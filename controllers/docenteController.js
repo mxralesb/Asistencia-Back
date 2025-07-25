@@ -1,3 +1,5 @@
+const db = require('../db');
+
 exports.getPerfil = async (req, res) => {
   try {
     const id = req.user.id;
