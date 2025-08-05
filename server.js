@@ -3,7 +3,9 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
 const docenteRoutes = require('./routes/docenteRoutes');
-const usuariosRoutes = require('./routes/usuarios.routes'); // ✅ CORRECTO
+const usuariosRoutes = require('./routes/usuarios.routes');
+const salonesRoutes = require('./routes/salones.routes');
+const alumnosRoutes = require('./routes/alumnos.routes');
 
 dotenv.config();
 const app = express();
@@ -22,7 +24,10 @@ app.use((req, res, next) => {
 // Rutas
 app.use('/api/auth', authRoutes);
 app.use('/api/docente', docenteRoutes);
-app.use('/api/usuarios', usuariosRoutes); // ✅ CORRECTO
+app.use('/api/usuarios', usuariosRoutes);
+app.use('/api/salones', salonesRoutes)
+app.use('/api/alumnos', alumnosRoutes); 
+
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`Servidor en puerto ${PORT}`));
