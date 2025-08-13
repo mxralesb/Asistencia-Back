@@ -4,7 +4,8 @@ const router = express.Router();
 const {
   registrarDocente,
   obtenerDocentes,
-  cambiarEstadoUsuario
+  cambiarEstadoUsuario,
+  cambiarContrasena 
 } = require('../controllers/usuarios.controller');
 
 // Registrar docente
@@ -15,5 +16,8 @@ router.get('/docentes', obtenerDocentes);
 
 // Cambiar estado de usuario (docente)
 router.put('/:id/estado', cambiarEstadoUsuario);
+
+// **Cambiar contraseña**
+router.put('/cambiar-contrasena', cambiarContrasena);
 
 module.exports = router;
