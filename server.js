@@ -2,9 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
-const docenteRoutes = require('./routes/docenteRoutes');
+
 const usuariosRoutes = require('./routes/usuarios.routes');
-const salonesRoutes = require('./routes/salones.routes');
+
 const alumnosRoutes = require('./routes/alumnos.routes');
 
 dotenv.config();
@@ -23,9 +23,8 @@ app.use((req, res, next) => {
 
 // Rutas
 app.use('/api/auth', authRoutes);
-app.use('/api/docente', docenteRoutes);
+
 app.use('/api/usuarios', usuariosRoutes);
-app.use('/api/salones', salonesRoutes)
 app.use('/api/alumnos', alumnosRoutes); 
 
 

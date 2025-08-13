@@ -3,7 +3,7 @@ const transporter = require('./utils/mailer');
 
 const mailOptions = {
   from: process.env.EMAIL_USER,
-  to: 'bvillatorom4@gmail.com', // reemplaza con un correo real tuyo
+  to: 'jvariosusos@gmail.com', // reemplaza con un correo real tuyo
   subject: '📧 Prueba de envío de correo',
   text: 'Este es un mensaje de prueba desde Nodemailer y tu backend.'
 };

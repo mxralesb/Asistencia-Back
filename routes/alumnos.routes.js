@@ -1,45 +1,68 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
-const QRCode = require('qrcode'); 
-// POST: registrar nuevo alumno y generar su QR
+const QRCode = require('qrcode');
+
+// POST: registrar nuevo alumno y generar su QR (usando grado, no salon_id)
 router.post('/', async (req, res) => {
-  const { nombre_completo, carnet, salon_id, activo } = req.body;
+  const { nombre_completo, carnet, grado, activo } = req.body;
 
   try {
-    
-    const qrData = await QRCode.toDataURL(carnet); 
+    if (!nombre_completo || !carnet || !grado) {
+      return res.status(400).json({ error: 'Faltan datos obligatorios.' });
+    }
 
+    // Insertar alumno sin qr_codigo
     const resultado = await pool.query(
-      'INSERT INTO asistenciaqr.alumnos (nombre_completo, carnet, salon_id, activo, qr_codigo) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [nombre_completo, carnet, salon_id, activo, qrData]
+      'INSERT INTO asistenciaqr.alumnos (nombre_completo, carnet, grado, activo) VALUES ($1, $2, $3, $4) RETURNING *',
+      [nombre_completo, carnet, grado, activo ?? true]
     );
 
-    res.status(201).json(resultado.rows[0]);
+    const alumnoId = resultado.rows[0].id;
+
+    // Generar QR con el ID del alumno
+    const qrData = await QRCode.toDataURL(`${alumnoId}`);
+
+    // Actualizar registro con el QR generado
+    await pool.query(
+      'UPDATE asistenciaqr.alumnos SET qr_codigo = $1 WHERE id = $2',
+      [qrData, alumnoId]
+    );
+
+    // Consultar el alumno actualizado
+    const alumnoConQr = await pool.query(
+      'SELECT * FROM asistenciaqr.alumnos WHERE id = $1',
+      [alumnoId]
+    );
+
+    res.status(201).json(alumnoConQr.rows[0]);
   } catch (error) {
     console.error('Error al registrar alumno:', error.message);
     res.status(500).json({ error: 'Error al registrar alumno' });
   }
 });
 
-// GET /api/alumnos/por-grado
+// GET /api/alumnos/por-grado?grado=Primero (sin JOIN, solo filtro simple)
 router.get('/por-grado', async (req, res) => {
-  const { grado, seccion } = req.query;
+  const { grado } = req.query;
+
+  if (!grado) {
+    return res.status(400).json({ error: 'El parámetro grado es obligatorio.' });
+  }
+
   try {
     const result = await pool.query(
-      `SELECT a.id, a.nombre_completo, a.carnet, s.grado, s.seccion, s.nombre AS salon 
-       FROM asistenciaqr.alumnos a
-       JOIN asistenciaqr.salones s ON a.salon_id = s.id
-       WHERE s.grado = $1 AND s.seccion = $2 AND a.activo = true
-       ORDER BY a.nombre_completo`,
-      [grado, seccion]
+      `SELECT id, nombre_completo, carnet, grado, activo, qr_codigo
+       FROM asistenciaqr.alumnos
+       WHERE grado = $1`,
+      [grado]
     );
+
     res.json(result.rows);
-  } catch (err) {
-    console.error('Error al consultar alumnos por grado:', err);
-    res.status(500).json({ error: 'Error al obtener alumnos' });
+  } catch (error) {
+    console.error('Error al consultar alumnos por grado:', error);
+    res.status(500).json({ error: 'Error al consultar alumnos' });
   }
 });
-
 
 module.exports = router;

@@ -22,8 +22,8 @@ const registrarDocente = async (req, res) => {
 
     if (existe.rows.length === 0) {
       await pool.query(`
-        INSERT INTO asistenciaqr.usuarios (nombre, correo, password, rol, grado)
-        VALUES ($1, $2, $3, 'docente', $4)
+        INSERT INTO asistenciaqr.usuarios (nombre, correo, password, rol, grado, activo)
+        VALUES ($1, $2, $3, 'docente', $4, true)
       `, [nombre, correo, hashedPassword, grado]);
     } else {
       await pool.query(`
@@ -76,25 +76,27 @@ const obtenerDocentes = async (req, res) => {
   }
 };
 
-
-
 const cambiarEstadoUsuario = async (req, res) => {
   const { id } = req.params;
   const { activo } = req.body;
 
   try {
-    await pool.query(`
+    const result = await pool.query(`
       UPDATE asistenciaqr.usuarios
       SET activo = $1
       WHERE id = $2
+      RETURNING id, activo
     `, [activo, id]);
 
-    res.json({ mensaje: 'Estado actualizado correctamente' });
+    if (result.rowCount === 0) {
+      return res.status(404).json({ mensaje: 'Usuario no encontrado' });
+    }
+
+    res.json({ mensaje: 'Estado actualizado correctamente', usuario: result.rows[0] });
   } catch (error) {
     console.error('Error al cambiar el estado:', error);
     res.status(500).json({ error: 'Error al cambiar el estado del usuario.' });
   }
 };
-
 
 module.exports = { registrarDocente, obtenerDocentes, cambiarEstadoUsuario };
