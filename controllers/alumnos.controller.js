@@ -1,45 +1,52 @@
+// controllers/alumnos.controller.js
 const pool = require('../db');
 const QRCode = require('qrcode');
 
 exports.crearAlumno = async (req, res) => {
   try {
-    const { nombre_completo, carnet, grado, activo } = req.body;
+    let { nombre_completo, carnet, grado, activo } = req.body;
+
+    // Normaliza/valida
+    nombre_completo = (nombre_completo || '').trim();
+    carnet = (carnet || '').trim().toUpperCase();
+    grado = (grado || '').trim();
+    const estado = typeof activo === 'boolean' ? activo : true;
 
     if (!nombre_completo || !carnet || !grado) {
       return res.status(400).json({ mensaje: 'Faltan datos obligatorios.' });
     }
 
-    // Insertar alumno
-    const nuevoAlumno = await pool.query(
+    // Inserta alumno
+    const { rows } = await pool.query(
       `INSERT INTO asistenciaqr.alumnos (nombre_completo, carnet, grado, activo)
        VALUES ($1, $2, $3, $4) RETURNING *`,
-      [nombre_completo, carnet, grado, activo ?? true]
+      [nombre_completo, carnet, grado, estado]
     );
+    const alumno = rows[0];
 
-    const alumno = nuevoAlumno.rows[0];
+    // Genera QR basado en el CARNET (o usa `${alumno.id}|${alumno.carnet}`)
+    const qrDataUrl = await QRCode.toDataURL(alumno.carnet);
 
-    // Generar QR basado en el CARNET
-    const qrDataUrl = await QRCode.toDataURL(`${alumno.carnet}`);
-
-    // Guardar QR en la tabla
+    // Guarda QR
     await pool.query(
       `UPDATE asistenciaqr.alumnos SET qr_codigo = $1 WHERE id = $2`,
       [qrDataUrl, alumno.id]
     );
 
-    // Devolver el alumno actualizado con qr_codigo
-    const alumnoConQr = await pool.query(
-      `SELECT * FROM asistenciaqr.alumnos WHERE id = $1`,
+    // Devuelve actualizado
+    const resAlumno = await pool.query(
+      `SELECT id, nombre_completo, carnet, grado, activo, qr_codigo
+       FROM asistenciaqr.alumnos WHERE id = $1`,
       [alumno.id]
     );
 
-    res.status(201).json({ 
-      alumno: alumnoConQr.rows[0], 
-      qr_codigo: qrDataUrl 
-    });
-
+    return res.status(201).json({ alumno: resAlumno.rows[0] });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ mensaje: 'Error al registrar alumno.' });
+    // Clave única violada (carnet UNIQUE)
+    if (error?.code === '23505') {
+      return res.status(409).json({ mensaje: 'El carnet ya existe.' });
+    }
+    console.error('crearAlumno error:', error);
+    return res.status(500).json({ mensaje: 'Error al registrar alumno.' });
   }
 };

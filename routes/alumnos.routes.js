@@ -3,66 +3,99 @@ const router = express.Router();
 const pool = require('../db');
 const QRCode = require('qrcode');
 
-// POST: registrar nuevo alumno y generar su QR (usando grado, no salon_id)
+// POST /api/alumnos   -> crear alumno
 router.post('/', async (req, res) => {
-  const { nombre_completo, carnet, grado, activo } = req.body;
-
   try {
+    const { nombre_completo, carnet, grado, activo } = req.body;
     if (!nombre_completo || !carnet || !grado) {
       return res.status(400).json({ error: 'Faltan datos obligatorios.' });
     }
 
-    // Insertar alumno sin qr_codigo
-    const resultado = await pool.query(
-      'INSERT INTO asistenciaqr.alumnos (nombre_completo, carnet, grado, activo) VALUES ($1, $2, $3, $4) RETURNING *',
-      [nombre_completo, carnet, grado, activo ?? true]
+    const insert = await pool.query(
+      `INSERT INTO asistenciaqr.alumnos (nombre_completo, carnet, grado, activo)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [nombre_completo.trim(), carnet.trim().toUpperCase(), grado.trim(), activo ?? true]
     );
+    const alumno = insert.rows[0];
 
-    const alumnoId = resultado.rows[0].id;
+    // Generar QR con ID
+    const dataUrl = await QRCode.toDataURL(String(alumno.carnet));
+    await pool.query(`UPDATE asistenciaqr.alumnos SET qr_codigo = $1 WHERE carnet = $2`, [dataUrl, alumno.carnet]);
 
-    // Generar QR con el ID del alumno
-    const qrData = await QRCode.toDataURL(`${alumnoId}`);
-
-    // Actualizar registro con el QR generado
-    await pool.query(
-      'UPDATE asistenciaqr.alumnos SET qr_codigo = $1 WHERE id = $2',
-      [qrData, alumnoId]
+    const { rows } = await pool.query(
+      `SELECT * FROM asistenciaqr.alumnos WHERE carnet = $1`,
+      [alumno.carnet]
     );
-
-    // Consultar el alumno actualizado
-    const alumnoConQr = await pool.query(
-      'SELECT * FROM asistenciaqr.alumnos WHERE id = $1',
-      [alumnoId]
-    );
-
-    res.status(201).json(alumnoConQr.rows[0]);
-  } catch (error) {
-    console.error('Error al registrar alumno:', error.message);
-    res.status(500).json({ error: 'Error al registrar alumno' });
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err?.code === '23505') return res.status(409).json({ error: 'El carnet ya existe.' });
+    console.error('POST /api/alumnos error:', err);
+    res.status(500).json({ error: 'Error al registrar alumno.' });
   }
 });
 
-// GET /api/alumnos/por-grado?grado=Primero (sin JOIN, solo filtro simple)
-router.get('/por-grado', async (req, res) => {
-  const { grado } = req.query;
 
-  if (!grado) {
-    return res.status(400).json({ error: 'El parámetro grado es obligatorio.' });
-  }
-
+router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT id, nombre_completo, carnet, grado, activo, qr_codigo
-       FROM asistenciaqr.alumnos
-       WHERE grado = $1`,
-      [grado]
-    );
+    const q = (req.query.q || '').trim();
+    const grado = (req.query.grado || '').trim();
+    const activoParam = req.query.activo;
 
-    res.json(result.rows);
-  } catch (error) {
-    console.error('Error al consultar alumnos por grado:', error);
+    const clauses = [];
+    const values = [];
+    let i = 1;
+
+    if (q) { clauses.push(`(a.nombre_completo ILIKE '%' || $${i} || '%' OR a.carnet ILIKE '%' || $${i} || '%')`); values.push(q); i++; }
+    if (grado) { clauses.push(`a.grado ILIKE '%' || $${i} || '%'`); values.push(grado); i++; }
+    if (typeof activoParam !== 'undefined') { clauses.push(`a.activo = $${i}`); values.push(String(activoParam).toLowerCase() === 'true'); i++; }
+
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const sql = `
+      WITH docente_global AS (
+        SELECT u.nombre
+        FROM asistenciaqr.usuarios u
+        WHERE u.rol = 'docente' AND u.activo = TRUE
+        ORDER BY u.id DESC
+        LIMIT 1
+      )
+      SELECT
+        a.id, a.nombre_completo, a.carnet, a.grado, a.activo, a.qr_codigo,
+        COALESCE(u.nombre, dg.nombre) AS docente_nombre
+      FROM asistenciaqr.alumnos a
+      LEFT JOIN asistenciaqr.usuarios u
+        ON lower(trim(u.grado)) = lower(trim(a.grado))
+       AND u.rol = 'docente'
+       AND u.activo = TRUE
+      LEFT JOIN docente_global dg ON TRUE
+      ${where}
+      ORDER BY a.nombre_completo ASC
+    `;
+    const { rows } = await pool.query(sql, values);
+    res.json(rows);
+  } catch (err) {
+    console.error('GET /api/alumnos error:', err);
     res.status(500).json({ error: 'Error al consultar alumnos' });
   }
 });
 
-module.exports = router;
+
+router.get('/:id/qr', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rows } = await pool.query(`SELECT carnet FROM asistenciaqr.alumnos WHERE id = $1`, [id]);
+    if (!rows.length) return res.status(404).send('Alumno no encontrado');
+
+    const dataUrl = await QRCode.toDataURL(rows[0].carnet);
+    const base64 = dataUrl.split(',')[1];
+    const img = Buffer.from(base64, 'base64');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="QR-${rows[0].carnet}.png"`);
+    res.send(img);
+  } catch (e) {
+    console.error('GET /api/alumnos/:id/qr error:', e);
+    res.status(500).send('Error generando QR');
+  }
+});
+
+module.exports = router; // 👈 QUE NO FALTE

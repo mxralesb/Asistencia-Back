@@ -23,6 +23,7 @@ app.use((req, res, next) => {
 
 // Rutas
 app.use('/api/auth', authRoutes);
+app.use('/api/alumnos', require('./routes/alumnos.routes'));
 
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/alumnos', alumnosRoutes); 
