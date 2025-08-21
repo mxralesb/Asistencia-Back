@@ -3,7 +3,7 @@ const router = express.Router();
 const pool = require('../db');
 const QRCode = require('qrcode');
 
-// POST /api/alumnos   -> crear alumno
+// POST /api/alumnos -> crear alumno (sin usuario_id)
 router.post('/', async (req, res) => {
   try {
     const { nombre_completo, carnet, grado, activo } = req.body;
@@ -18,9 +18,12 @@ router.post('/', async (req, res) => {
     );
     const alumno = insert.rows[0];
 
-    // Generar QR con ID
+    // Generar QR con el carnet
     const dataUrl = await QRCode.toDataURL(String(alumno.carnet));
-    await pool.query(`UPDATE asistenciaqr.alumnos SET qr_codigo = $1 WHERE carnet = $2`, [dataUrl, alumno.carnet]);
+    await pool.query(
+      `UPDATE asistenciaqr.alumnos SET qr_codigo = $1 WHERE carnet = $2`,
+      [dataUrl, alumno.carnet]
+    );
 
     const { rows } = await pool.query(
       `SELECT * FROM asistenciaqr.alumnos WHERE carnet = $1`,
@@ -28,13 +31,15 @@ router.post('/', async (req, res) => {
     );
     res.status(201).json(rows[0]);
   } catch (err) {
-    if (err?.code === '23505') return res.status(409).json({ error: 'El carnet ya existe.' });
+    if (err?.code === '23505') {
+      return res.status(409).json({ error: 'El carnet ya existe.' });
+    }
     console.error('POST /api/alumnos error:', err);
     res.status(500).json({ error: 'Error al registrar alumno.' });
   }
 });
 
-
+// GET /api/alumnos -> lista (como antes, con docente por grado/fallback opcional)
 router.get('/', async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
@@ -79,16 +84,20 @@ router.get('/', async (req, res) => {
   }
 });
 
-
+// GET /api/alumnos/:id/qr -> descarga PNG
 router.get('/:id/qr', async (req, res) => {
   try {
     const { id } = req.params;
-    const { rows } = await pool.query(`SELECT carnet FROM asistenciaqr.alumnos WHERE id = $1`, [id]);
+    const { rows } = await pool.query(
+      `SELECT carnet FROM asistenciaqr.alumnos WHERE id = $1`,
+      [id]
+    );
     if (!rows.length) return res.status(404).send('Alumno no encontrado');
 
     const dataUrl = await QRCode.toDataURL(rows[0].carnet);
     const base64 = dataUrl.split(',')[1];
     const img = Buffer.from(base64, 'base64');
+
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Disposition', `attachment; filename="QR-${rows[0].carnet}.png"`);
     res.send(img);
@@ -98,4 +107,4 @@ router.get('/:id/qr', async (req, res) => {
   }
 });
 
-module.exports = router; // 👈 QUE NO FALTE
+module.exports = router;

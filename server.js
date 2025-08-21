@@ -24,9 +24,14 @@ app.use((req, res, next) => {
 // Rutas
 app.use('/api/auth', authRoutes);
 app.use('/api/alumnos', require('./routes/alumnos.routes'));
+app.use('/api/asistencia', require('./routes/asistencia.routes'));
 
 app.use('/api/usuarios', usuariosRoutes);
 app.use('/api/alumnos', alumnosRoutes); 
+
+app.use('/api/reportes', require('./routes/reportes.routes'));
+app.use('/api/reportes', require('./routes/docente.routes'));
+
 
 
 const PORT = process.env.PORT || 4000;
