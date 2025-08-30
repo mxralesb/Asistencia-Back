@@ -9,70 +9,83 @@ router.get('/alumno/:alumnoId', async (req, res) => {
     const { alumnoId } = req.params;
     let { desde, hasta } = req.query;
 
-    // 1) Alumno existe
-    const a = await pool.query(
+    // A) Verificar alumno
+    const { rows: alumnoRows } = await pool.query(
       `SELECT id, nombre_completo, carnet, grado
        FROM asistenciaqr.alumnos
        WHERE id = $1`,
       [alumnoId]
     );
-    if (!a.rowCount) return res.status(404).json({ error: 'Alumno no encontrado' });
-    const alumno = a.rows[0];
+    if (!alumnoRows.length) return res.status(404).json({ error: 'Alumno no encontrado' });
+    const alumno = alumnoRows[0];
 
-    // 2) Rango por defecto (últimos 30 días) en formato texto YYYY-MM-DD
+    
     if (!desde || !hasta) {
-      const def = await pool.query(`
-        SELECT
-          to_char(CURRENT_DATE - INTERVAL '29 days', 'YYYY-MM-DD') AS desde,
-          to_char(CURRENT_DATE, 'YYYY-MM-DD') AS hasta
-      `);
-      if (!desde) desde = def.rows[0].desde;
-      if (!hasta) hasta = def.rows[0].hasta;
+      const { rows: todayRows } = await pool.query(`SELECT CURRENT_DATE::date AS hoy`);
+      const hoy = todayRows[0].hoy;
+      const { rows: defRows } = await pool.query(
+        `SELECT ($1::date - INTERVAL '29 days')::date AS desde, $1::date AS hasta`,
+        [hoy]
+      );
+      desde = desde || defRows[0].desde.toISOString().slice(0,10);
+      hasta = hasta || defRows[0].hasta.toISOString().slice(0,10);
     }
 
-    // 3) Filtros fecha
+   
     const filtros = [];
-    const vals = [alumnoId];
+    const valores = [alumnoId];
     let i = 2;
-    if (desde) { filtros.push(`f.fecha >= $${i}::date`); vals.push(desde); i++; }
-    if (hasta) { filtros.push(`f.fecha <= $${i}::date`); vals.push(hasta); i++; }
-    const whereFecha = filtros.length ? `WHERE ${filtros.join(' AND ')}` : '';
+    if (desde) { filtros.push(`f.fecha >= $${i}::date`); valores.push(desde); i++; }
+    if (hasta) { filtros.push(`f.fecha <= $${i}::date`); valores.push(hasta); i++; }
+    const whereFecha = filtros.length ? `AND ${filtros.join(' AND ')}` : '';
 
-    // 4) Detalle por fecha (incluye sin registro)
-    const detalleSQL = `
+  
+    const sql = `
       WITH fechas AS (
         SELECT id, fecha
         FROM asistenciaqr.fechas_asistencia f
-        ${whereFecha}
+        WHERE 1=1 ${whereFecha}
         ORDER BY fecha DESC
       )
-      SELECT
-        to_char(f.fecha, 'YYYY-MM-DD') AS fecha,
+      SELECT 
+        $1::int AS alumno_id,
+        a.nombre_completo,
+        a.carnet,
+        a.grado,
+        f.fecha::date AS fecha,
         COALESCE(asis.estado, 'sin_registro') AS estado,
-        asis.observaciones
+        asis.observaciones,
+        u.nombre AS docente_nombre,
+        (
+          SELECT (regexp_match(COALESCE(asis.observaciones,''), '([0-2][0-9]:[0-5][0-9])'))[1]
+        ) AS hora
       FROM fechas f
+      CROSS JOIN asistenciaqr.alumnos a
       LEFT JOIN asistenciaqr.asistencia asis
-        ON asis.fecha_id = f.id
-       AND asis.alumno_id = $1
-      ORDER BY f.fecha DESC
+        ON asis.alumno_id = a.id
+       AND asis.fecha_id = f.id
+      LEFT JOIN asistenciaqr.usuarios u
+        ON u.id = asis.registrado_por
+      WHERE a.id = $1
+      ORDER BY f.fecha DESC;
     `;
-    const { rows: detalle } = await pool.query(detalleSQL, vals);
 
-    // 5) Resumen
-    const resumen = detalle.reduce((acc, r) => {
-      acc[r.estado] = (acc[r.estado] || 0) + 1;
-      acc.total = (acc.total || 0) + 1;
+    const { rows } = await pool.query(sql, valores);
+
+    // Resumen
+    const resumen = rows.reduce((acc, r) => {
+      const key = r.estado || 'sin_registro';
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
-    }, { total: 0 });
+    }, {});
+    const total = rows.length;
 
-    // 6) Respuesta (compat: registros = detalle)
     res.json({
       alumno,
       rango: { desde, hasta },
-      total: resumen.total,
-      resumen,              // { presente, tarde, ausente, sin_registro, total }
-      detalle,              // array con { fecha, estado, observaciones }
-      registros: detalle    // alias para compatibilidad con el front
+      total,
+      resumen,
+      registros: rows
     });
   } catch (e) {
     console.error('GET /api/reportes/alumno/:alumnoId error:', e);

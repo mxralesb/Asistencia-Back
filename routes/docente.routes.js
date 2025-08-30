@@ -86,7 +86,7 @@ router.get('/mis-alumnos', authRequired, async (req, res) => {
   }
 });
 
-// (mantén tu ruta existente)
+
 // GET /api/docente/:usuarioId/alumnos
 router.get('/:usuarioId/alumnos', async (req, res) => {
   try {
